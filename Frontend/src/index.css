@@ -372,7 +372,7 @@ hr {
   border-radius: 50%;
   object-fit: cover;
   border: 2px solid white;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .chat-user-details h3 {
@@ -528,18 +528,6 @@ hr {
 .send-btn:hover {
   background: var(--color-accent-hover);
   transform: translateY(-1px);
-}
-
-.send-btn:disabled {
-  background: var(--color-border);
-  color: var(--color-text-secondary);
-  cursor: not-allowed;
-  transform: none;
-}
-
-.send-btn:disabled:hover {
-  background: var(--color-border);
-  transform: none;
 }
 
 /* No Chat Selected State */
