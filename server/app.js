@@ -2,9 +2,12 @@ import session from "express-session";
 import passport from "passport";
 import authRoutes from "./routes/authRouter.js";
 import userRoutes from './routes/userRoutes.js'; 
-
+import cors from "cors";
 
 function startApp(app, express) {
+  app.use(cors({
+    origin: "http://localhost:3000"
+  }));
   // --- Middleware ---
   app.use(
     session({
