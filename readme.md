@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://via.placeholder.com/150x150.png?text=K" alt="Kalam Logo" width="120" />
+  <img src="./client/public/favicon.svg" alt="Kalam Logo" width="120" />
   <h1>Kalam - Real-time Chat Application</h1>
   <p>
     A feature-rich, full-stack real-time chat application built with a modern, scalable architecture.
