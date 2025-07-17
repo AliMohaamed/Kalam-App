@@ -1,4 +1,4 @@
-import { useState, useEffect, useContext } from "react";
+import { useState, useEffect, useContext, useRef } from "react";
 import { AuthContext } from "../context/AuthContext";
 import apiClient from "../services/api"; // Import our new api client
 import {
@@ -23,6 +23,9 @@ const ChatPage = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [messages, setMessages] = useState([]);
   const [currentMessage, setCurrentMessage] = useState("");
+  const [userUnreadCounts, setUserUnreadCounts] = useState({});
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const messagesEndRef = useRef(null);
 
   const { socket } = useContext(SocketContext);
 
@@ -38,7 +41,6 @@ const ChatPage = () => {
           (user) => user.id !== authUser.id
         );
         setUsers(otherUsers);
-        console.log("Fetched users:", otherUsers);
       } catch (error) {
         console.error("Failed to fetch users:", error);
       } finally {
@@ -62,7 +64,9 @@ const ChatPage = () => {
       // 2. Optimistic UI Update: Add the message to our own chat window immediately
       const newMessage = {
         senderId: authUser.id,
-        message: currentMessage,
+        content: currentMessage,
+        createdAt: new Date().toISOString(),
+        recipientId: selectedUser.id,
       };
       setMessages((prevMessages) => [...prevMessages, newMessage]);
 
@@ -71,7 +75,6 @@ const ChatPage = () => {
     }
   };
 
- 
   // This effect listens for incoming messages from the socket server
   useEffect(() => {
     console.log("Socket connected:", socket);
@@ -80,6 +83,12 @@ const ChatPage = () => {
         // Only add the message to the state if it's from the currently selected user
         if (selectedUser && newMessage.senderId === selectedUser.id) {
           setMessages((prevMessages) => [...prevMessages, newMessage]);
+        } else {
+          // If message is from a different user, increment their unread count
+          setUserUnreadCounts((prev) => ({
+            ...prev,
+            [newMessage.senderId]: (prev[newMessage.senderId] || 0) + 1,
+          }));
         }
       };
 
@@ -90,7 +99,59 @@ const ChatPage = () => {
         socket.off("receiveMessage", handleReceiveMessage);
       };
     }
-  }, [socket, selectedUser]); // Re-run this effect if socket or selectedUser changes
+  }, [socket, selectedUser]);
+
+  useEffect(() => {
+    // Function to fetch message history for the selected user
+    const fetchMessages = async () => {
+      // If no user is selected, clear messages and do nothing
+      if (!selectedUser) {
+        setMessages([]);
+        return;
+      }
+
+      try {
+        setIsLoadingMessages(true);
+        const response = await apiClient.get(`/messages/${selectedUser.id}`);
+        setMessages(response.data);
+        console.log("messages:", response.data);
+
+        // Clear unread count for selected user
+        setUserUnreadCounts((prev) => ({
+          ...prev,
+          [selectedUser.id]: 0,
+        }));
+      } catch (error) {
+        console.error("Failed to fetch messages:", error);
+      } finally {
+        setIsLoadingMessages(false);
+      }
+    };
+
+    fetchMessages();
+  }, [selectedUser]);
+
+  // This effect marks messages as read when a chat is opened
+  useEffect(() => {
+    // Check if there are any unread messages from the selected user
+    const unreadMessages = messages.filter(
+      (msg) => !msg.read && msg.senderId === selectedUser?.id
+    );
+
+    if (socket && unreadMessages.length > 0) {
+      socket.emit("markAsRead", {
+        conversationId: unreadMessages[0].conversationId,
+        senderId: selectedUser.id,
+      });
+    }
+  }, [messages, selectedUser, socket]);
+
+  // Auto scroll to bottom when messages change
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages]);
 
   return (
     <div className="chat-container">
@@ -147,9 +208,9 @@ const ChatPage = () => {
                     <img
                       src={
                         user.image ||
-                        `https://ui-avatars.com/api/?name=${user.displayName}&background=667eea&color=fff`
+                        `https://ui-avatars.com/api/?name=${user.displayName}&background=3b82f6&color=fff`
                       }
-                      alt={user.name}
+                      alt={user.displayName}
                     />
                     <div className="online-indicator"></div>
                   </div>
@@ -159,7 +220,11 @@ const ChatPage = () => {
                   </div>
                   <div className="user-meta">
                     <span className="last-seen">2m</span>
-                    <div className="unread-badge">3</div>
+                    {userUnreadCounts[user.id] > 0 && (
+                      <div className="unread-badge">
+                        {userUnreadCounts[user.id]}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))
@@ -184,16 +249,15 @@ const ChatPage = () => {
                 <div className="chat-avatar">
                   <img
                     src={
-                      selectedUser.profilePicture ||
-                      `https://ui-avatars.com/api/?name=${selectedUser.name}&background=667eea&color=fff`
+                      selectedUser.image ||
+                      `https://ui-avatars.com/api/?name=${selectedUser.displayName}&background=3b82f6&color=fff`
                     }
-                    alt={selectedUser.name}
+                    alt={selectedUser.displayName}
                   />
                   <div className="online-indicator"></div>
                 </div>
                 <div className="chat-user-details">
-                  <h3>{selectedUser.name}</h3>
-                  <span className="user-status">Online • Last seen 2m ago</span>
+                  <h3>{selectedUser.displayName}</h3>
                 </div>
               </div>
               <div className="chat-actions">
@@ -212,45 +276,56 @@ const ChatPage = () => {
             {/* Chat Messages Area */}
             <div className="chat-messages">
               <div className="messages-container">
-                {/* Sample messages for demonstration */}
-                <div className="message-group">
-                  <div className="message received">
-                    <div className="message-content">
-                      Hey there! How are you doing?
-                    </div>
-                    <div className="message-time">2:30 PM</div>
+                {isLoadingMessages ? (
+                  <div className="loading-state">
+                    <div className="loading-spinner"></div>
+                    <span>Loading messages...</span>
                   </div>
-                  <div className="message received">
-                    <div className="message-content">
-                      I wanted to ask you about the project we discussed
-                      yesterday.
+                ) : messages.length > 0 ? (
+                  messages.map((msg, index) => (
+                    <div key={index} className="message-group">
+                      <div
+                        className={`message ${
+                          msg.senderId === authUser.id ? "sent" : "received"
+                        }`}
+                      >
+                        <div className="message-content">
+                          {msg.content || msg.message}
+                        </div>
+                        <div className="message-time">
+                          {msg.createdAt
+                            ? new Date(msg.createdAt).toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })
+                            : new Date().toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                        </div>
+                      </div>
                     </div>
-                    <div className="message-time">2:31 PM</div>
+                  ))
+                ) : (
+                  <div className="no-messages">
+                    <MessageCircle size={48} />
+                    <p>No messages yet. Start the conversation!</p>
                   </div>
-                </div>
-
-                <div className="message-group">
-                  <div className="message sent">
-                    <div className="message-content">
-                      Hi! I'm doing great, thanks for asking! 😊
-                    </div>
-                    <div className="message-time">2:35 PM</div>
-                  </div>
-                  <div className="message sent">
-                    <div className="message-content">
-                      Sure! I've been working on it. Let me share the updates
-                      with you.
-                    </div>
-                    <div className="message-time">2:35 PM</div>
-                  </div>
-                </div>
+                )}
+                <div ref={messagesEndRef} />
               </div>
             </div>
 
             {/* Message Input Area - NOW FUNCTIONAL */}
             <form className="message-input-area" onSubmit={handleSendMessage}>
               <div className="input-container">
-                <button type="button" className="attachment-btn" title="Attach File"><Paperclip size={20} /></button>
+                <button
+                  type="button"
+                  className="attachment-btn"
+                  title="Attach File"
+                >
+                  <Paperclip size={20} />
+                </button>
                 <input
                   type="text"
                   placeholder="Type a message..."
@@ -258,8 +333,12 @@ const ChatPage = () => {
                   value={currentMessage}
                   onChange={(e) => setCurrentMessage(e.target.value)}
                 />
-                <button type="button" className="emoji-btn" title="Add Emoji"><Smile size={20} /></button>
-                <button type="submit" className="send-btn" title="Send Message"><Send size={20} /></button>
+                <button type="button" className="emoji-btn" title="Add Emoji">
+                  <Smile size={20} />
+                </button>
+                <button type="submit" className="send-btn" title="Send Message">
+                  <Send size={20} />
+                </button>
               </div>
             </form>
           </>

@@ -1,6 +1,9 @@
 import jwt from "jsonwebtoken";
+import { PrismaClient } from "@prisma/client";
 
-// This object will act as a simple in-memory store
+const prisma = new PrismaClient();
+
+// This object will act as a simple in-memory store (This is All users connected )
 // to map user IDs to their active socket IDs.
 const userSocketMap = {}; // { userId: socketId }
 
@@ -42,34 +45,85 @@ const initializeSocket = (io) => {
     console.log("User Socket Map:", userSocketMap);
 
     // --- NEW: Listen for chat messages ---
-    socket.on("sendMessage", ({ recipientId, message }) => {
-      console.log(
-        `Message from ${socket.user.displayName} to ${recipientId}: ${message}`
-      );
-
-      // Find the recipient's socket ID from our map
-      const recipientSocketId = userSocketMap[recipientId];
-      console.log(
-        `Recipient Socket ID: ${recipientSocketId}`
-      );
-
-      if (recipientSocketId) {
-        // If the recipient is connected, send the message directly to them
-        io.to(recipientSocketId).emit("receiveMessage", {
-          senderId: userId,
-          message: message,
+    socket.on("sendMessage", async ({ recipientId, message }) => {
+      try {
+        // --- NEW: Database Logic ---
+        // 1. Find or create the conversation between the two users
+        let conversation = await prisma.conversation.findFirst({
+          where: {
+            AND: [
+              { participants: { some: { userId: userId } } },
+              { participants: { some: { userId: recipientId } } },
+            ],
+          },
         });
+
+        if (!conversation) {
+          conversation = await prisma.conversation.create({
+            data: {
+              participants: {
+                create: [{ userId: userId }, { userId: recipientId }],
+              },
+            },
+          });
+          console.log("New conversation created");
+        }
+
+        // 2. Create the new message and link it to the conversation
+        const newMessage = await prisma.message.create({
+          data: {
+            content: message,
+            senderId: userId,
+            recipientId: recipientId,
+            conversationId: conversation.id,
+          },
+        });
+        // --- Real-time Logic (as before) ---
+        const recipientSocketId = userSocketMap[recipientId];
+        if (recipientSocketId) {
+          io.to(recipientSocketId).emit("receiveMessage", newMessage);
+        }
+      } catch (error) {
+        console.error("Error handling sendMessage:", error);
       }
-      // Note: If the user is offline, you might want to save the message to the DB
+    });
+
+    // --- NEW: Listen for when a user reads messages ---
+    socket.on("markAsRead", async ({ conversationId, senderId }) => {
+      try {
+        // Update all messages in the conversation that were sent by the other user
+        // and are directed to the current user.
+        await prisma.message.updateMany({
+          where: {
+            conversationId: conversationId,
+            senderId: senderId, // The other user
+            recipientId: socket.user.id, // The current user
+            read: false,
+          },
+          data: {
+            read: true,
+          },
+        });
+
+        // --- Notify the original sender that their messages were read ---
+        // Find the sender's socket to notify them in real-time
+        const senderSocketId = userSocketMap[senderId];
+        if (senderSocketId) {
+          io.to(senderSocketId).emit("messagesRead", { conversationId });
+        }
+      } catch (error) {
+        console.error("Error in markAsRead:", error);
+      }
     });
 
     // Handle disconnection
-    socket.on('disconnect', () => {
-      console.log(`User disconnected: ${socket.user.displayName} (${socket.id})`);
+    socket.on("disconnect", () => {
+      console.log(
+        `User disconnected: ${socket.user.displayName} (${socket.id})`
+      );
       // Remove the user from our map on disconnect
       delete userSocketMap[userId];
     });
-
   });
 };
 

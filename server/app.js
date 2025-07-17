@@ -2,6 +2,7 @@ import session from "express-session";
 import passport from "passport";
 import authRoutes from "./routes/authRouter.js";
 import userRoutes from './routes/userRoutes.js'; 
+import messageRoutes from './routes/messageRoutes.js';
 import cors from "cors";
 
 function startApp(app, express) {
@@ -22,6 +23,7 @@ function startApp(app, express) {
   // --- Routes ---
   app.use("/api/auth", authRoutes);
   app.use('/api/users', userRoutes);
+  app.use('/api/messages', messageRoutes);
 
   app.get("/", (req, res) => {
     res.send("API is running...");

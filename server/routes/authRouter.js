@@ -13,7 +13,7 @@ router.get('/google', passport.authenticate('google', { scope: ['profile', 'emai
 // Handles the callback from Google and calls our controller function.
 router.get(
   '/google/callback',
-  passport.authenticate('google', { failureRedirect: '/' }),
+  passport.authenticate('google', { failureRedirect: process.env.CLIENT_URL }),
   googleCallback // <-- Use the imported controller function here
 );
 
